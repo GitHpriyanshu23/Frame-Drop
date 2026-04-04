@@ -734,7 +734,7 @@ function App() {
 
   const handleShare = async () => {
     const shareUrl =
-      'https://x.com/intent/tweet?text=Made+with+FrameDrop+%F0%9F%96%A4&url=https://framedrop.app'
+      'https://x.com/intent/tweet?text=Made+with+FrameDrop+%F0%9F%96%A4&url=https://frame-drop-23.vercel.app'
 
     if (!uploadedSrc || uploadedType !== 'image') {
       window.open(shareUrl, '_blank', 'noopener,noreferrer')
