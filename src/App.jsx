@@ -330,7 +330,9 @@ function buildCanvasDimensions(aspect, uploadedMeta) {
 
 function App() {
   const fileInputRef = useRef(null)
+  const backgroundInputRef = useRef(null)
   const uploadObjectUrlRef = useRef('')
+  const backgroundObjectUrlsRef = useRef([])
   const themeTransitionTimerRef = useRef(null)
 
   const [uploadedSrc, setUploadedSrc] = useState('')
@@ -356,6 +358,7 @@ function App() {
   const [statusMessage, setStatusMessage] = useState('')
   const [isCopying, setIsCopying] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
+  const [customBackgrounds, setCustomBackgrounds] = useState([])
   const [failedLocal, setFailedLocal] = useState([])
   const [unsplashNonce, setUnsplashNonce] = useState(0)
   const [failedUnsplash, setFailedUnsplash] = useState([])
@@ -366,6 +369,7 @@ function App() {
   useEffect(() => {
     return () => {
       if (uploadObjectUrlRef.current) URL.revokeObjectURL(uploadObjectUrlRef.current)
+      backgroundObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
       if (themeTransitionTimerRef.current) window.clearTimeout(themeTransitionTimerRef.current)
     }
   }, [])
@@ -441,6 +445,29 @@ function App() {
   const onFileChange = (event) => {
     const file = event.target.files?.[0]
     if (file) onPickFile(file)
+  }
+
+  const onBackgroundFileChange = (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const hasImageMime = file.type.toLowerCase().startsWith('image/')
+    const hasImageExtension = /\.(png|jpe?g|webp|gif|bmp|avif)$/i.test(file.name)
+
+    if (!hasImageMime && !hasImageExtension) {
+      setStatusMessage('Please upload an image file for background.')
+      event.target.value = ''
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    const key = `uploaded-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+    backgroundObjectUrlsRef.current.push(objectUrl)
+    setCustomBackgrounds((prev) => [{ key, label: file.name, url: objectUrl }, ...prev].slice(0, 15))
+    setSelectedBg({ type: 'photo', value: objectUrl })
+    setStatusMessage('Background image uploaded.')
+    event.target.value = ''
   }
 
   const onDrop = (event) => {
@@ -925,6 +952,37 @@ function App() {
 
       <div className="panel-section">
         <div className="ai-header">
+          <p className="section-title">Import Background</p>
+        </div>
+        <button type="button" className="ghost-btn" style={{ width: '100%' }} onClick={() => backgroundInputRef.current?.click()}>
+          Upload Background
+        </button>
+      </div>
+
+      {customBackgrounds.length > 0 && (
+        <div className="panel-section">
+          <p className="section-title">Your Uploads</p>
+          <div className="swatch-grid scrollable-grid">
+            {customBackgrounds.map((item) => {
+              const active = selectedBg.type === 'photo' && selectedBg.value === item.url
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`swatch ${active ? 'swatch-active' : ''}`}
+                  title={item.label}
+                  onClick={() => onSelectPhotoBackground(item.url, item.label)}
+                >
+                  <img src={item.url} alt={item.label} className="swatch-image" loading="lazy" />
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="panel-section">
+        <div className="ai-header">
           <p className="section-title">Local Library</p>
         </div>
         <div className="swatch-grid scrollable-grid">
@@ -1219,6 +1277,7 @@ function App() {
           )}
 
           <input ref={fileInputRef} type="file" accept="image/*,video/*" className="sr-only" onChange={onFileChange} />
+          <input ref={backgroundInputRef} type="file" accept="image/*" className="sr-only" onChange={onBackgroundFileChange} />
         </div>
         {statusMessage && <p className="status-line">{statusMessage}</p>}
       </main>
