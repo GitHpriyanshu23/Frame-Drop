@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { BACKGROUND_LIBRARY } from './Backgrounds/library.js'
 
 const ASPECT_RATIOS = [
   { label: 'Auto', value: 'auto' },
@@ -247,6 +248,17 @@ function loadImage(src, crossOrigin = true) {
   })
 }
 
+function isRemoteHttpUrl(src) {
+  return /^https?:\/\//i.test(src)
+}
+
+async function loadBackgroundImage(src) {
+  if (isRemoteHttpUrl(src)) {
+    return await loadImage(src, true)
+  }
+  return await loadImage(src, false)
+}
+
 function loadVideoMeta(src) {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video')
@@ -263,8 +275,21 @@ function loadVideoMeta(src) {
 
 function selectRecorderMimeType() {
   if (!window.MediaRecorder) return ''
-  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+  const candidates = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4;codecs=h264,aac',
+    'video/mp4',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
+  ]
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || ''
+}
+
+function getVideoDownloadMeta(blob) {
+  const type = blob.type || 'video/webm'
+  if (type.includes('mp4')) return { filename: 'framedrop.mp4', label: 'framedrop.mp4' }
+  return { filename: 'framedrop.webm', label: 'framedrop.webm' }
 }
 
 function drawImageCover(ctx, image, targetW, targetH) {
@@ -318,7 +343,11 @@ function App() {
   const [glassBorderEnabled, setGlassBorderEnabled] = useState(true)
   const [glassBorderStrength, setGlassBorderStrength] = useState(62)
   const [aspectRatio, setAspectRatio] = useState('auto')
-  const [selectedBg, setSelectedBg] = useState({ type: 'solid', value: '#0a0a0a' })
+  const [selectedBg, setSelectedBg] = useState(() => {
+    const firstLocal = BACKGROUND_LIBRARY[0]?.url
+    if (firstLocal) return { type: 'photo', value: firstLocal }
+    return { type: 'solid', value: '#0a0a0a' }
+  })
   const [aiPrompt, setAiPrompt] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
@@ -327,6 +356,7 @@ function App() {
   const [statusMessage, setStatusMessage] = useState('')
   const [isCopying, setIsCopying] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
+  const [failedLocal, setFailedLocal] = useState([])
   const [unsplashNonce, setUnsplashNonce] = useState(0)
   const [failedUnsplash, setFailedUnsplash] = useState([])
   const [theme, setTheme] = useState(getInitialTheme)
@@ -345,6 +375,7 @@ function App() {
     window.localStorage.setItem(THEME_STORAGE_KEY, theme)
   }, [theme])
 
+  const libraryPresets = BACKGROUND_LIBRARY
   const unsplashPresets = useMemo(
     () =>
       UNSPLASH_PRESET_BASE.map((item) => ({
@@ -362,7 +393,7 @@ function App() {
     if (selectedBg.type === 'gradient') return { backgroundImage: gradientToCss(selectedBg.value) }
 
     return {
-      backgroundImage: `url(${selectedBg.value})`,
+      backgroundImage: `url("${selectedBg.value}")`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
     }
@@ -438,6 +469,15 @@ function App() {
     }
   }
 
+  const onSelectPhotoBackground = async (url, label = 'Background') => {
+    try {
+      await loadBackgroundImage(url)
+      setSelectedBg({ type: 'photo', value: url })
+    } catch {
+      setStatusMessage(`Could not load ${label}. Try another image.`)
+    }
+  }
+
   const drawBackgroundToCanvas = async (ctx, width, height) => {
     if (selectedBg.type === 'solid') {
       ctx.fillStyle = selectedBg.value
@@ -465,7 +505,7 @@ function App() {
       return null
     }
 
-    const backgroundImage = await loadImage(selectedBg.value)
+    const backgroundImage = await loadBackgroundImage(selectedBg.value)
     drawImageCover(ctx, backgroundImage, width, height)
     return backgroundImage
   }
@@ -588,7 +628,7 @@ function App() {
     const radius = Math.min(cornerRadius, drawWidth / 2, drawHeight / 2)
 
     let bgImage = null
-    if (selectedBg.type === 'photo') bgImage = await loadImage(selectedBg.value)
+    if (selectedBg.type === 'photo') bgImage = await loadBackgroundImage(selectedBg.value)
 
     const drawFrame = () => {
       if (selectedBg.type === 'solid') {
@@ -721,10 +761,11 @@ function App() {
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      anchor.download = uploadedType === 'video' ? 'framedrop.webm' : 'framedrop.png'
+      const videoMeta = uploadedType === 'video' ? getVideoDownloadMeta(blob) : null
+      anchor.download = uploadedType === 'video' ? videoMeta.filename : 'framedrop.png'
       anchor.click()
       URL.revokeObjectURL(url)
-      setStatusMessage(uploadedType === 'video' ? 'Downloaded framedrop.webm.' : 'Downloaded framedrop.png.')
+      setStatusMessage(uploadedType === 'video' ? `Downloaded ${videoMeta.label}.` : 'Downloaded framedrop.png.')
     } catch (error) {
       setStatusMessage(error.message || 'Download failed.')
     } finally {
@@ -884,7 +925,42 @@ function App() {
 
       <div className="panel-section">
         <div className="ai-header">
-          <p className="section-title">Preset Templates</p>
+          <p className="section-title">Local Library</p>
+        </div>
+        <div className="swatch-grid scrollable-grid">
+          {libraryPresets.map((item) => {
+            const active = selectedBg.type === 'photo' && selectedBg.value === item.url
+            const failed = failedLocal.includes(item.key)
+
+            return (
+              <button
+                key={item.label}
+                type="button"
+                className={`swatch ${active ? 'swatch-active' : ''}`}
+                title={item.label}
+                onClick={() => onSelectPhotoBackground(item.url, item.label)}
+              >
+                {!failed && (
+                  <img
+                    src={item.url}
+                    alt={`${item.label} preset`}
+                    className="swatch-image"
+                    loading="lazy"
+                    onError={() => {
+                      setFailedLocal((prev) => (prev.includes(item.key) ? prev : [...prev, item.key]))
+                    }}
+                  />
+                )}
+                {failed && <span className="swatch-fallback">{item.label.slice(0, 3).toUpperCase()}</span>}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="panel-section">
+        <div className="ai-header">
+          <p className="section-title">Unsplash</p>
           <button
             type="button"
             className="ghost-btn"
@@ -907,7 +983,7 @@ function App() {
                 type="button"
                 className={`swatch ${active ? 'swatch-active' : ''}`}
                 title={item.label}
-                onClick={() => setSelectedBg({ type: 'photo', value: item.url })}
+                onClick={() => onSelectPhotoBackground(item.url, item.label)}
               >
                 {!failed && (
                   <img
