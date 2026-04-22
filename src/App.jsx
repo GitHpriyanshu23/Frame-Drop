@@ -9,6 +9,12 @@ const ASPECT_RATIOS = [
   { label: '9:16', value: '9:16' },
 ]
 
+const WINDOW_FRAME_OPTIONS = [
+  { label: 'None', value: 'none' },
+  { label: 'macOS', value: 'macos' },
+  { label: 'Windows', value: 'windows' },
+]
+
 const UNSPLASH_PRESET_BASE = [
   {
     label: 'Nature',
@@ -328,6 +334,138 @@ function buildCanvasDimensions(aspect, uploadedMeta) {
   return { width: 1920, height: 1080 }
 }
 
+function getWindowTitlebarHeight(frameStyle) {
+  if (frameStyle === 'macos') return 38
+  if (frameStyle === 'windows') return 36
+  return 0
+}
+
+function buildMediaLayout(canvasWidth, canvasHeight, mediaRatio, padding, cornerRadius, frameStyle) {
+  const safeWidth = Math.max(1, canvasWidth - padding * 2)
+  const safeHeight = Math.max(1, canvasHeight - padding * 2)
+  const titlebarHeight = getWindowTitlebarHeight(frameStyle)
+  const contentMaxHeight = Math.max(1, safeHeight - titlebarHeight)
+  const contentRatio = safeWidth / contentMaxHeight
+
+  let contentWidth = safeWidth
+  let contentHeight = contentMaxHeight
+  if (mediaRatio > contentRatio) contentHeight = safeWidth / mediaRatio
+  else contentWidth = contentMaxHeight * mediaRatio
+
+  const frameWidth = contentWidth
+  const frameHeight = contentHeight + titlebarHeight
+  const frameX = (canvasWidth - frameWidth) / 2
+  const frameY = (canvasHeight - frameHeight) / 2
+  const frameRadius = Math.min(cornerRadius + (frameStyle === 'none' ? 0 : 8), frameWidth / 2, frameHeight / 2)
+
+  return {
+    frameX,
+    frameY,
+    frameWidth,
+    frameHeight,
+    frameRadius,
+    titlebarHeight,
+    mediaX: frameX,
+    mediaY: frameY + titlebarHeight,
+    mediaWidth: contentWidth,
+    mediaHeight: contentHeight,
+    mediaRadius: Math.min(cornerRadius, contentWidth / 2, contentHeight / 2),
+  }
+}
+
+function drawWindowChromeToCanvas(ctx, layout, frameStyle, shadowIntensity, colorTheme = 'dark') {
+  const { frameX, frameY, frameWidth, frameHeight, frameRadius, titlebarHeight } = layout
+  const isDark = colorTheme === 'dark'
+
+  ctx.save()
+  ctx.shadowColor = `rgba(0, 0, 0, ${Math.max(0, shadowIntensity / 150)})`
+  ctx.shadowBlur = shadowIntensity * 1.15
+  ctx.shadowOffsetY = shadowIntensity * 0.34
+  ctx.beginPath()
+  ctx.roundRect(frameX, frameY, frameWidth, frameHeight, frameRadius)
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.18)'
+  ctx.fill()
+  ctx.restore()
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.roundRect(frameX, frameY, frameWidth, frameHeight, frameRadius)
+  ctx.clip()
+
+  if (frameStyle === 'macos') {
+    const bodyTop = isDark ? '#1e2127' : '#f7f8fb'
+    const bodyBottom = isDark ? '#171a20' : '#eef1f5'
+    const titleTop = isDark ? '#2a2f37' : '#f1f2f5'
+    const titleBottom = isDark ? '#232833' : '#e3e6eb'
+    const bodyGradient = ctx.createLinearGradient(frameX, frameY + titlebarHeight, frameX, frameY + frameHeight)
+    bodyGradient.addColorStop(0, bodyTop)
+    bodyGradient.addColorStop(1, bodyBottom)
+    ctx.fillStyle = bodyGradient
+    ctx.fillRect(frameX, frameY + titlebarHeight, frameWidth, frameHeight - titlebarHeight)
+
+    const titleGradient = ctx.createLinearGradient(frameX, frameY, frameX, frameY + titlebarHeight)
+    titleGradient.addColorStop(0, titleTop)
+    titleGradient.addColorStop(1, titleBottom)
+    ctx.fillStyle = titleGradient
+    ctx.fillRect(frameX, frameY, frameWidth, titlebarHeight)
+
+    const dotY = frameY + titlebarHeight / 2
+    const dotX = frameX + 18
+    const dotGap = 14
+    ;['#ff605c', '#ffbd44', '#00ca4e'].forEach((color, idx) => {
+      ctx.beginPath()
+      ctx.fillStyle = color
+      ctx.arc(dotX + idx * dotGap, dotY, 4.7, 0, Math.PI * 2)
+      ctx.fill()
+    })
+  } else {
+    const bodyTop = isDark ? '#171d28' : '#f4f6fa'
+    const bodyBottom = isDark ? '#131923' : '#e9edf4'
+    const titleTop = isDark ? '#273247' : '#e8edf6'
+    const titleBottom = isDark ? '#1e283a' : '#dbe3f0'
+    const bodyGradient = ctx.createLinearGradient(frameX, frameY + titlebarHeight, frameX, frameY + frameHeight)
+    bodyGradient.addColorStop(0, bodyTop)
+    bodyGradient.addColorStop(1, bodyBottom)
+    ctx.fillStyle = bodyGradient
+    ctx.fillRect(frameX, frameY + titlebarHeight, frameWidth, frameHeight - titlebarHeight)
+
+    const titleGradient = ctx.createLinearGradient(frameX, frameY, frameX, frameY + titlebarHeight)
+    titleGradient.addColorStop(0, titleTop)
+    titleGradient.addColorStop(1, titleBottom)
+    ctx.fillStyle = titleGradient
+    ctx.fillRect(frameX, frameY, frameWidth, titlebarHeight)
+
+    const buttonSize = 10
+    const baseX = frameX + frameWidth - 16
+    const centerY = frameY + titlebarHeight / 2
+    ctx.strokeStyle = isDark ? '#d4dded' : '#4b5567'
+    ctx.lineWidth = 1.2
+
+    ctx.beginPath()
+    ctx.moveTo(baseX - buttonSize * 2 - 12, centerY + 2)
+    ctx.lineTo(baseX - buttonSize * 2 + 2, centerY + 2)
+    ctx.stroke()
+
+    ctx.strokeRect(baseX - buttonSize - 8, centerY - 4, 9, 8)
+
+    ctx.beginPath()
+    ctx.moveTo(baseX, centerY - 4)
+    ctx.lineTo(baseX + 8, centerY + 4)
+    ctx.moveTo(baseX + 8, centerY - 4)
+    ctx.lineTo(baseX, centerY + 4)
+    ctx.stroke()
+  }
+
+  ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.16)' : 'rgba(25, 28, 33, 0.2)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(frameX, frameY + titlebarHeight + 0.5)
+  ctx.lineTo(frameX + frameWidth, frameY + titlebarHeight + 0.5)
+  ctx.stroke()
+
+  ctx.restore()
+}
+
 function App() {
   const fileInputRef = useRef(null)
   const backgroundInputRef = useRef(null)
@@ -344,6 +482,7 @@ function App() {
   const [shadowIntensity, setShadowIntensity] = useState(80)
   const [glassBorderEnabled, setGlassBorderEnabled] = useState(true)
   const [glassBorderStrength, setGlassBorderStrength] = useState(62)
+  const [windowFrameStyle, setWindowFrameStyle] = useState('macos')
   const [aspectRatio, setAspectRatio] = useState('auto')
   const [selectedBg, setSelectedBg] = useState(() => {
     const firstLocal = BACKGROUND_LIBRARY[0]?.url
@@ -391,6 +530,22 @@ function App() {
   )
 
   const previewRatio = aspectValueToRatio(aspectRatio, uploadedMeta)
+  const previewCanvasDimensions = useMemo(
+    () => buildCanvasDimensions(aspectRatio, uploadedMeta),
+    [aspectRatio, uploadedMeta],
+  )
+  const previewMediaRatio = uploadedMeta?.width && uploadedMeta?.height ? uploadedMeta.width / uploadedMeta.height : null
+  const previewLayout = useMemo(() => {
+    if (!previewMediaRatio) return null
+    return buildMediaLayout(
+      previewCanvasDimensions.width,
+      previewCanvasDimensions.height,
+      previewMediaRatio,
+      padding,
+      cornerRadius,
+      windowFrameStyle,
+    )
+  }, [previewMediaRatio, previewCanvasDimensions, padding, cornerRadius, windowFrameStyle])
 
   const previewBackgroundStyle = useMemo(() => {
     if (selectedBg.type === 'solid') return { backgroundColor: selectedBg.value }
@@ -402,6 +557,14 @@ function App() {
       backgroundPosition: 'center',
     }
   }, [selectedBg])
+
+  const previewBorderStyle = glassBorderEnabled
+    ? `${(1 + glassBorderStrength / 35).toFixed(2)}px solid rgba(255,255,255,${Math.min(0.18 + glassBorderStrength / 320, 0.7)})`
+    : 'none'
+
+  const previewShadowStyle = `0 ${Math.round(shadowIntensity * 0.35)}px ${Math.round(shadowIntensity * 0.95)}px rgba(0,0,0,${Math.max(0, shadowIntensity / 150)})${
+    glassBorderEnabled ? `, inset 0 1px 0 rgba(255,255,255,${Math.min(0.09 + glassBorderStrength / 500, 0.35)})` : ''
+  }`
 
   const onPickFile = (file) => {
     if (!file || (!file.type.startsWith('image/') && !file.type.startsWith('video/'))) {
@@ -574,38 +737,40 @@ function App() {
     await drawBackgroundToCanvas(ctx, width, height)
 
     const uploadedImage = await loadImage(uploadedSrc, false)
-    const safeWidth = Math.max(1, width - padding * 2)
-    const safeHeight = Math.max(1, height - padding * 2)
     const imageRatio = uploadedImage.width / uploadedImage.height
-    const safeRatio = safeWidth / safeHeight
+    const layout = buildMediaLayout(width, height, imageRatio, padding, cornerRadius, windowFrameStyle)
 
-    let drawWidth = safeWidth
-    let drawHeight = safeHeight
-    if (imageRatio > safeRatio) drawHeight = safeWidth / imageRatio
-    else drawWidth = safeHeight * imageRatio
+    if (windowFrameStyle === 'none') {
+      ctx.save()
+      ctx.shadowColor = `rgba(0, 0, 0, ${Math.max(0, shadowIntensity / 150)})`
+      ctx.shadowBlur = shadowIntensity * 1.1
+      ctx.shadowOffsetY = shadowIntensity * 0.28
+      ctx.beginPath()
+      ctx.roundRect(layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, layout.mediaRadius)
+      ctx.fillStyle = 'rgba(0,0,0,0.01)'
+      ctx.fill()
+      ctx.restore()
 
-    const x = (width - drawWidth) / 2
-    const y = (height - drawHeight) / 2
-    const radius = Math.min(cornerRadius, drawWidth / 2, drawHeight / 2)
+      ctx.save()
+      ctx.beginPath()
+      ctx.roundRect(layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, layout.mediaRadius)
+      ctx.clip()
+      ctx.drawImage(uploadedImage, layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight)
+      ctx.restore()
 
-    ctx.save()
-    ctx.shadowColor = `rgba(0, 0, 0, ${Math.max(0, shadowIntensity / 150)})`
-    ctx.shadowBlur = shadowIntensity * 1.1
-    ctx.shadowOffsetY = shadowIntensity * 0.28
-    ctx.beginPath()
-    ctx.roundRect(x, y, drawWidth, drawHeight, radius)
-    ctx.fillStyle = 'rgba(0,0,0,0.01)'
-    ctx.fill()
-    ctx.restore()
+      drawGlassBorderToCanvas(ctx, layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, layout.mediaRadius)
+    } else {
+      drawWindowChromeToCanvas(ctx, layout, windowFrameStyle, shadowIntensity, theme)
 
-    ctx.save()
-    ctx.beginPath()
-    ctx.roundRect(x, y, drawWidth, drawHeight, radius)
-    ctx.clip()
-    ctx.drawImage(uploadedImage, x, y, drawWidth, drawHeight)
-    ctx.restore()
+      ctx.save()
+      ctx.beginPath()
+      ctx.roundRect(layout.frameX, layout.frameY, layout.frameWidth, layout.frameHeight, layout.frameRadius)
+      ctx.clip()
+      ctx.drawImage(uploadedImage, layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight)
+      ctx.restore()
 
-    drawGlassBorderToCanvas(ctx, x, y, drawWidth, drawHeight, radius)
+      drawGlassBorderToCanvas(ctx, layout.frameX, layout.frameY, layout.frameWidth, layout.frameHeight, layout.frameRadius)
+    }
 
     return await new Promise((resolve, reject) => {
       canvas.toBlob((blob) => {
@@ -640,19 +805,8 @@ function App() {
       workingVideo.onerror = () => reject(new Error('Could not load uploaded video for export.'))
     })
 
-    const safeWidth = Math.max(1, width - padding * 2)
-    const safeHeight = Math.max(1, height - padding * 2)
     const videoRatio = workingVideo.videoWidth / workingVideo.videoHeight
-    const safeRatio = safeWidth / safeHeight
-
-    let drawWidth = safeWidth
-    let drawHeight = safeHeight
-    if (videoRatio > safeRatio) drawHeight = safeWidth / videoRatio
-    else drawWidth = safeHeight * videoRatio
-
-    const x = (width - drawWidth) / 2
-    const y = (height - drawHeight) / 2
-    const radius = Math.min(cornerRadius, drawWidth / 2, drawHeight / 2)
+    const layout = buildMediaLayout(width, height, videoRatio, padding, cornerRadius, windowFrameStyle)
 
     let bgImage = null
     if (selectedBg.type === 'photo') bgImage = await loadBackgroundImage(selectedBg.value)
@@ -681,24 +835,37 @@ function App() {
         drawImageCover(ctx, bgImage, width, height)
       }
 
-      ctx.save()
-      ctx.shadowColor = `rgba(0, 0, 0, ${Math.max(0, shadowIntensity / 150)})`
-      ctx.shadowBlur = shadowIntensity * 1.1
-      ctx.shadowOffsetY = shadowIntensity * 0.28
-      ctx.beginPath()
-      ctx.roundRect(x, y, drawWidth, drawHeight, radius)
-      ctx.fillStyle = 'rgba(0,0,0,0.01)'
-      ctx.fill()
-      ctx.restore()
+      if (windowFrameStyle === 'none') {
+        ctx.save()
+        ctx.shadowColor = `rgba(0, 0, 0, ${Math.max(0, shadowIntensity / 150)})`
+        ctx.shadowBlur = shadowIntensity * 1.1
+        ctx.shadowOffsetY = shadowIntensity * 0.28
+        ctx.beginPath()
+        ctx.roundRect(layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, layout.mediaRadius)
+        ctx.fillStyle = 'rgba(0,0,0,0.01)'
+        ctx.fill()
+        ctx.restore()
 
-      ctx.save()
-      ctx.beginPath()
-      ctx.roundRect(x, y, drawWidth, drawHeight, radius)
-      ctx.clip()
-      ctx.drawImage(workingVideo, x, y, drawWidth, drawHeight)
-      ctx.restore()
+        ctx.save()
+        ctx.beginPath()
+        ctx.roundRect(layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, layout.mediaRadius)
+        ctx.clip()
+        ctx.drawImage(workingVideo, layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight)
+        ctx.restore()
 
-      drawGlassBorderToCanvas(ctx, x, y, drawWidth, drawHeight, radius)
+        drawGlassBorderToCanvas(ctx, layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, layout.mediaRadius)
+      } else {
+        drawWindowChromeToCanvas(ctx, layout, windowFrameStyle, shadowIntensity, theme)
+
+        ctx.save()
+        ctx.beginPath()
+        ctx.roundRect(layout.frameX, layout.frameY, layout.frameWidth, layout.frameHeight, layout.frameRadius)
+        ctx.clip()
+        ctx.drawImage(workingVideo, layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight)
+        ctx.restore()
+
+        drawGlassBorderToCanvas(ctx, layout.frameX, layout.frameY, layout.frameWidth, layout.frameHeight, layout.frameRadius)
+      }
     }
 
     const stream = canvas.captureStream(30)
@@ -914,6 +1081,19 @@ function App() {
 
       <div className="panel-section">
         <p className="section-title">Frame Effects</p>
+        <div className="chip-grid" style={{ marginBottom: '10px' }}>
+          {WINDOW_FRAME_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`chip ${windowFrameStyle === option.value ? 'chip-active' : ''}`}
+              onClick={() => setWindowFrameStyle(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
         <div className="chip-grid">
           <button
             type="button"
@@ -1224,56 +1404,65 @@ function App() {
             </div>
           )}
 
-          {uploadedSrc && uploadedType === 'image' && (
-            <img
-              src={uploadedSrc}
-              alt="Uploaded preview"
-              className="preview-image"
+          {uploadedSrc && previewLayout && windowFrameStyle === 'none' && (
+            <div
+              className="preview-layer"
               style={{
+                left: `${(previewLayout.mediaX / previewCanvasDimensions.width) * 100}%`,
+                top: `${(previewLayout.mediaY / previewCanvasDimensions.height) * 100}%`,
+                width: `${(previewLayout.mediaWidth / previewCanvasDimensions.width) * 100}%`,
+                height: `${(previewLayout.mediaHeight / previewCanvasDimensions.height) * 100}%`,
                 borderRadius: `${cornerRadius}px`,
-                border: glassBorderEnabled
-                  ? `${(1 + glassBorderStrength / 35).toFixed(2)}px solid rgba(255,255,255,${Math.min(
-                      0.18 + glassBorderStrength / 320,
-                      0.7,
-                    )})`
-                  : 'none',
-                boxShadow: `0 ${Math.round(shadowIntensity * 0.35)}px ${Math.round(shadowIntensity * 0.95)}px rgba(0,0,0,${Math.max(
-                  0,
-                  shadowIntensity / 150,
-                )})${glassBorderEnabled ? `, inset 0 1px 0 rgba(255,255,255,${Math.min(0.09 + glassBorderStrength / 500, 0.35)})` : ''}`,
-                margin: `${padding}px`,
-                maxWidth: `calc(100% - ${padding * 2}px)`,
-                maxHeight: `calc(100% - ${padding * 2}px)`,
+                border: previewBorderStyle,
+                boxShadow: previewShadowStyle,
               }}
-            />
+            >
+              {uploadedType === 'image' ? (
+                <img src={uploadedSrc} alt="Uploaded preview" className="preview-image fitted" />
+              ) : (
+                <video src={uploadedSrc} className="preview-video fitted" autoPlay loop muted controls playsInline />
+              )}
+            </div>
           )}
 
-          {uploadedSrc && uploadedType === 'video' && (
-            <video
-              src={uploadedSrc}
-              className="preview-video"
-              autoPlay
-              loop
-              muted
-              controls
-              playsInline
+          {uploadedSrc && previewLayout && windowFrameStyle !== 'none' && (
+            <div
+              className={`preview-window preview-window-${windowFrameStyle}`}
               style={{
-                borderRadius: `${cornerRadius}px`,
-                border: glassBorderEnabled
-                  ? `${(1 + glassBorderStrength / 35).toFixed(2)}px solid rgba(255,255,255,${Math.min(
-                      0.18 + glassBorderStrength / 320,
-                      0.7,
-                    )})`
-                  : 'none',
-                boxShadow: `0 ${Math.round(shadowIntensity * 0.35)}px ${Math.round(shadowIntensity * 0.95)}px rgba(0,0,0,${Math.max(
-                  0,
-                  shadowIntensity / 150,
-                )})${glassBorderEnabled ? `, inset 0 1px 0 rgba(255,255,255,${Math.min(0.09 + glassBorderStrength / 500, 0.35)})` : ''}`,
-                margin: `${padding}px`,
-                maxWidth: `calc(100% - ${padding * 2}px)`,
-                maxHeight: `calc(100% - ${padding * 2}px)`,
+                left: `${(previewLayout.frameX / previewCanvasDimensions.width) * 100}%`,
+                top: `${(previewLayout.frameY / previewCanvasDimensions.height) * 100}%`,
+                width: `${(previewLayout.frameWidth / previewCanvasDimensions.width) * 100}%`,
+                height: `${(previewLayout.frameHeight / previewCanvasDimensions.height) * 100}%`,
+                '--titlebar-height': `${(previewLayout.titlebarHeight / previewLayout.frameHeight) * 100}%`,
+                '--window-radius': `${Math.min(cornerRadius + 8, 36)}px`,
+                border: previewBorderStyle,
+                boxShadow: previewShadowStyle,
               }}
-            />
+            >
+              <div className={`preview-window-titlebar ${windowFrameStyle === 'macos' ? 'macos' : 'windows'}`}>
+                {windowFrameStyle === 'macos' ? (
+                  <div className="window-controls-macos" aria-hidden="true">
+                    <span className="dot red" />
+                    <span className="dot yellow" />
+                    <span className="dot green" />
+                  </div>
+                ) : (
+                  <div className="window-controls-windows" aria-hidden="true">
+                    <span className="minimize" />
+                    <span className="maximize" />
+                    <span className="close" />
+                  </div>
+                )}
+              </div>
+
+              <div className="preview-window-content">
+                {uploadedType === 'image' ? (
+                  <img src={uploadedSrc} alt="Uploaded preview" className="preview-image framed" />
+                ) : (
+                  <video src={uploadedSrc} className="preview-video framed" autoPlay loop muted controls playsInline />
+                )}
+              </div>
+            </div>
           )}
 
           <input ref={fileInputRef} type="file" accept="image/*,video/*" className="sr-only" onChange={onFileChange} />

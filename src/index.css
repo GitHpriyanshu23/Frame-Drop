@@ -481,6 +481,194 @@ input[type='range'] {
   background: #000;
 }
 
+.preview-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--window-radius);
+  background: #eef2f7;
+}
+
+.preview-layer {
+  position: absolute;
+  overflow: hidden;
+}
+
+.preview-window-macos {
+  background: linear-gradient(180deg, #f6f8fb 0%, #ecf0f5 100%);
+}
+
+.preview-window-windows {
+  background: linear-gradient(180deg, #edf2f9 0%, #e3e9f3 100%);
+}
+
+.preview-window-titlebar {
+  height: var(--titlebar-height);
+  min-height: var(--titlebar-height);
+  border-bottom: 1px solid rgba(35, 40, 48, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 0 14px;
+  user-select: none;
+}
+
+.preview-window-titlebar.macos {
+  background: linear-gradient(180deg, #f3f5f8 0%, #e6ebf1 100%);
+}
+
+.preview-window-titlebar.windows {
+  background: linear-gradient(180deg, #e7edf7 0%, #dbe5f2 100%);
+}
+
+.preview-window-title {
+  color: #4f596a;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  font-weight: 600;
+}
+
+.window-controls-macos {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 8px;
+}
+
+.window-controls-macos .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.window-controls-macos .dot.red {
+  background: #ff605c;
+}
+
+.window-controls-macos .dot.yellow {
+  background: #ffbd44;
+}
+
+.window-controls-macos .dot.green {
+  background: #00ca4e;
+}
+
+.window-controls-windows {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 10px;
+  color: #465062;
+}
+
+:root[data-theme='dark'] .preview-window-macos {
+  background: linear-gradient(180deg, #1e2127 0%, #171a20 100%);
+}
+
+:root[data-theme='dark'] .preview-window-windows {
+  background: linear-gradient(180deg, #171d28 0%, #131923 100%);
+}
+
+:root[data-theme='dark'] .preview-window-titlebar {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+:root[data-theme='dark'] .preview-window-titlebar.macos {
+  background: linear-gradient(180deg, #2a2f37 0%, #232833 100%);
+}
+
+:root[data-theme='dark'] .preview-window-titlebar.windows {
+  background: linear-gradient(180deg, #273247 0%, #1e283a 100%);
+}
+
+:root[data-theme='dark'] .preview-window-title {
+  color: #dbe3f1;
+}
+
+:root[data-theme='dark'] .window-controls-windows {
+  color: #d4dded;
+}
+
+.window-controls-windows .minimize {
+  width: 10px;
+  height: 10px;
+  position: relative;
+}
+
+.window-controls-windows .minimize::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6px;
+  border-top: 1.5px solid currentColor;
+}
+
+.window-controls-windows .maximize {
+  width: 10px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  margin-top: 1px;
+}
+
+.window-controls-windows .close {
+  width: 10px;
+  height: 10px;
+  position: relative;
+}
+
+.window-controls-windows .close::before,
+.window-controls-windows .close::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0;
+  width: 1.5px;
+  height: 10px;
+  background: currentColor;
+}
+
+.window-controls-windows .close::before {
+  transform: rotate(45deg);
+}
+
+.window-controls-windows .close::after {
+  transform: rotate(-45deg);
+}
+
+.preview-window-content {
+  display: flex;
+  max-width: 100%;
+  max-height: 100%;
+  flex: 1;
+}
+
+.preview-image.fitted,
+.preview-video.fitted {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  display: block;
+}
+
+.preview-image.framed,
+.preview-video.framed {
+  display: block;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .status-line {
   margin-top: 10px;
   font-size: 0.76rem;
