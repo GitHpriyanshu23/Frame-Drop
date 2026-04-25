@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BACKGROUND_LIBRARY } from './Backgrounds/library.js'
+import lightThemeLogo from '../light-logo.png'
+import darkThemeLogo from '../dark-logo.png'
 
 const ASPECT_RATIOS = [
   { label: 'Auto', value: 'auto' },
@@ -14,6 +16,23 @@ const WINDOW_FRAME_OPTIONS = [
   { label: 'macOS', value: 'macos' },
   { label: 'Windows', value: 'windows' },
 ]
+
+const EDITOR_MODES = [
+  { label: 'Media', value: 'media' },
+  { label: 'Code', value: 'code' },
+]
+
+const CODE_CANVAS_MAX_HEIGHT = 30000
+
+const DEFAULT_CODE_SNIPPET = `function FrameDropCard({ code }: { code: string }) {
+  return (
+    <div className="card">
+      <pre>{code}</pre>
+    </div>
+  )
+}
+
+export default FrameDropCard`
 
 const UNSPLASH_PRESET_BASE = [
   {
@@ -334,9 +353,98 @@ function buildCanvasDimensions(aspect, uploadedMeta) {
   return { width: 1920, height: 1080 }
 }
 
+function getCodeLayoutMetrics(codeText, contentWidth) {
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    return {
+      gutterWidth: Math.max(44, Math.min(72, contentWidth * 0.1)),
+      textMaxWidth: Math.max(40, contentWidth - Math.max(44, Math.min(72, contentWidth * 0.1)) - 24),
+      fontSize: Math.max(12, Math.min(24, contentWidth * 0.022)),
+      lineHeight: Math.round(Math.max(12, Math.min(24, contentWidth * 0.022)) * 1.55),
+      padTop: Math.max(14, contentWidth * 0.03),
+      padBottom: 36,
+      wrappedLinesBySource: codeText.split('\n').map((line) => [line]),
+      contentHeight: 520,
+    }
+  }
+
+  const gutterWidth = Math.max(44, Math.min(72, contentWidth * 0.1))
+  const textMaxWidth = Math.max(40, contentWidth - gutterWidth - 24)
+  const fontSize = Math.max(12, Math.min(24, contentWidth * 0.022))
+  const lineHeight = Math.round(fontSize * 1.55)
+  const padTop = Math.max(14, contentWidth * 0.03)
+  const padBottom = 36
+
+  ctx.font = `${fontSize}px SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`
+  const wrappedLinesBySource = codeText.split('\n').map((line) => wrapTextLine(ctx, line, textMaxWidth))
+  const visualLineCount = wrappedLinesBySource.reduce((sum, line) => sum + line.length, 0)
+
+  // Keep extra terminal space so descenders on the last painted line never clip.
+  const contentHeight = Math.max(
+    260,
+    Math.ceil(padTop + padBottom + fontSize + Math.max(0, visualLineCount - 1) * lineHeight + lineHeight * 1.2),
+  )
+
+  return {
+    gutterWidth,
+    textMaxWidth,
+    fontSize,
+    lineHeight,
+    padTop,
+    padBottom,
+    wrappedLinesBySource,
+    contentHeight,
+  }
+}
+
+function estimateCodeContentHeight(codeText, contentWidth) {
+  return getCodeLayoutMetrics(codeText, contentWidth).contentHeight
+}
+
+function buildCodeCanvasDimensions(aspect, codeText, padding, frameStyle) {
+  const base = buildCanvasDimensions(aspect, null)
+  const titlebarHeight = getWindowTitlebarHeight(frameStyle)
+  const contentWidth = Math.max(320, base.width - padding * 2)
+  const contentHeight = estimateCodeContentHeight(codeText, contentWidth)
+  const requiredHeight = Math.ceil(contentHeight + titlebarHeight + padding * 2)
+
+  return {
+    width: base.width,
+    height: Math.min(CODE_CANVAS_MAX_HEIGHT, Math.max(base.height, requiredHeight)),
+  }
+}
+
+function buildCodeMediaLayout(canvasWidth, canvasHeight, codeText, padding, cornerRadius, frameStyle) {
+  const titlebarHeight = getWindowTitlebarHeight(frameStyle)
+  const frameRadius = Math.min(cornerRadius + (frameStyle === 'none' ? 0 : 8), (canvasWidth - padding * 2) / 2)
+  const maxContentWidth = Math.max(320, canvasWidth - padding * 2)
+  const codeMetrics = getCodeLayoutMetrics(codeText, maxContentWidth)
+  const contentHeight = codeMetrics.contentHeight
+  const frameWidth = maxContentWidth
+  const frameHeight = contentHeight + titlebarHeight
+  const frameX = (canvasWidth - frameWidth) / 2
+  const frameY = padding
+
+  return {
+    frameX,
+    frameY,
+    frameWidth,
+    frameHeight,
+    frameRadius,
+    titlebarHeight,
+    mediaX: frameX,
+    mediaY: frameY + titlebarHeight,
+    mediaWidth: frameWidth,
+    mediaHeight: contentHeight,
+    mediaRadius: Math.min(cornerRadius, frameWidth / 2, contentHeight / 2),
+    codeMetrics,
+  }
+}
+
 function getWindowTitlebarHeight(frameStyle) {
-  if (frameStyle === 'macos') return 38
-  if (frameStyle === 'windows') return 36
+  if (frameStyle === 'macos') return 52
+  if (frameStyle === 'windows') return 50
   return 0
 }
 
@@ -409,13 +517,14 @@ function drawWindowChromeToCanvas(ctx, layout, frameStyle, shadowIntensity, colo
     ctx.fillStyle = titleGradient
     ctx.fillRect(frameX, frameY, frameWidth, titlebarHeight)
 
+    const dotRadius = Math.max(5, titlebarHeight * 0.15)
     const dotY = frameY + titlebarHeight / 2
-    const dotX = frameX + 18
-    const dotGap = 14
+    const dotX = frameX + Math.max(16, titlebarHeight * 0.5)
+    const dotGap = dotRadius * 2.9
     ;['#ff605c', '#ffbd44', '#00ca4e'].forEach((color, idx) => {
       ctx.beginPath()
       ctx.fillStyle = color
-      ctx.arc(dotX + idx * dotGap, dotY, 4.7, 0, Math.PI * 2)
+      ctx.arc(dotX + idx * dotGap, dotY, dotRadius, 0, Math.PI * 2)
       ctx.fill()
     })
   } else {
@@ -435,24 +544,25 @@ function drawWindowChromeToCanvas(ctx, layout, frameStyle, shadowIntensity, colo
     ctx.fillStyle = titleGradient
     ctx.fillRect(frameX, frameY, frameWidth, titlebarHeight)
 
-    const buttonSize = 10
-    const baseX = frameX + frameWidth - 16
+    const buttonSize = Math.max(10, titlebarHeight * 0.22)
+    const buttonGap = Math.max(8, buttonSize * 0.35)
+    const baseX = frameX + frameWidth - Math.max(16, titlebarHeight * 0.55)
     const centerY = frameY + titlebarHeight / 2
     ctx.strokeStyle = isDark ? '#d4dded' : '#4b5567'
-    ctx.lineWidth = 1.2
+    ctx.lineWidth = Math.max(1.4, buttonSize * 0.13)
 
     ctx.beginPath()
-    ctx.moveTo(baseX - buttonSize * 2 - 12, centerY + 2)
-    ctx.lineTo(baseX - buttonSize * 2 + 2, centerY + 2)
+    ctx.moveTo(baseX - buttonSize * 2 - buttonGap * 2, centerY + buttonSize * 0.25)
+    ctx.lineTo(baseX - buttonSize * 2 - buttonGap * 0.6, centerY + buttonSize * 0.25)
     ctx.stroke()
 
-    ctx.strokeRect(baseX - buttonSize - 8, centerY - 4, 9, 8)
+    ctx.strokeRect(baseX - buttonSize - buttonGap, centerY - buttonSize * 0.42, buttonSize * 0.9, buttonSize * 0.8)
 
     ctx.beginPath()
-    ctx.moveTo(baseX, centerY - 4)
-    ctx.lineTo(baseX + 8, centerY + 4)
-    ctx.moveTo(baseX + 8, centerY - 4)
-    ctx.lineTo(baseX, centerY + 4)
+    ctx.moveTo(baseX, centerY - buttonSize * 0.42)
+    ctx.lineTo(baseX + buttonSize * 0.8, centerY + buttonSize * 0.42)
+    ctx.moveTo(baseX + buttonSize * 0.8, centerY - buttonSize * 0.42)
+    ctx.lineTo(baseX, centerY + buttonSize * 0.42)
     ctx.stroke()
   }
 
@@ -462,6 +572,100 @@ function drawWindowChromeToCanvas(ctx, layout, frameStyle, shadowIntensity, colo
   ctx.moveTo(frameX, frameY + titlebarHeight + 0.5)
   ctx.lineTo(frameX + frameWidth, frameY + titlebarHeight + 0.5)
   ctx.stroke()
+
+  ctx.restore()
+}
+
+function wrapTextLine(ctx, line, maxWidth) {
+  if (!line) return ['']
+  if (ctx.measureText(line).width <= maxWidth) return [line]
+
+  const chunks = []
+  let current = ''
+
+  for (const char of line) {
+    const next = current + char
+    if (ctx.measureText(next).width <= maxWidth) {
+      current = next
+      continue
+    }
+
+    if (current) chunks.push(current)
+    current = char
+  }
+
+  if (current) chunks.push(current)
+  return chunks.length ? chunks : ['']
+}
+
+function drawCodeContentToCanvas(ctx, x, y, width, height, codeText, options = {}) {
+  const { colorTheme = 'dark', metrics: providedMetrics = null } = options
+  const isDark = colorTheme === 'dark'
+  const panelBg = isDark ? '#06080d' : '#f8fafc'
+  const gutterBg = isDark ? '#0d121a' : '#ecf2ff'
+  const textColor = isDark ? '#e6edf7' : '#1f2937'
+  const lineColor = isDark ? '#8ea1bf' : '#52627a'
+  const borderColor = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(18, 32, 53, 0.12)'
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(x, y, width, height)
+  ctx.clip()
+
+  if (isDark) {
+    const codeGradient = ctx.createLinearGradient(x, y, x + width, y)
+    codeGradient.addColorStop(0, '#06080d')
+    codeGradient.addColorStop(0.5, '#050912')
+    codeGradient.addColorStop(1, '#06080d')
+    ctx.fillStyle = codeGradient
+  } else {
+    ctx.fillStyle = panelBg
+  }
+  ctx.fillRect(x, y, width, height)
+
+  const metrics = providedMetrics || getCodeLayoutMetrics(codeText, width)
+  const gutterWidth = metrics.gutterWidth
+  ctx.fillStyle = gutterBg
+  ctx.fillRect(x, y, gutterWidth, height)
+
+  ctx.strokeStyle = borderColor
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(x + gutterWidth + 0.5, y)
+  ctx.lineTo(x + gutterWidth + 0.5, y + height)
+  ctx.stroke()
+
+  const fontSize = metrics.fontSize
+  const lineHeight = metrics.lineHeight
+  const padTop = metrics.padTop
+  const textX = x + gutterWidth + 14
+  const wrappedLinesBySource = metrics.wrappedLinesBySource
+
+  ctx.font = `${fontSize}px SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`
+  ctx.textBaseline = 'alphabetic'
+
+  let yCursor = y + padTop + fontSize
+  let lineNumber = 1
+
+  for (const wrapped of wrappedLinesBySource) {
+    let firstChunk = true
+
+    for (const chunk of wrapped) {
+      if (firstChunk) {
+        ctx.fillStyle = lineColor
+        ctx.textAlign = 'right'
+        ctx.fillText(String(lineNumber), x + gutterWidth - 10, yCursor)
+      }
+
+      ctx.fillStyle = textColor
+      ctx.textAlign = 'left'
+      ctx.fillText(chunk, textX, yCursor)
+      yCursor += lineHeight
+      firstChunk = false
+    }
+
+    lineNumber += 1
+  }
 
   ctx.restore()
 }
@@ -476,6 +680,8 @@ function App() {
   const [uploadedSrc, setUploadedSrc] = useState('')
   const [uploadedType, setUploadedType] = useState('none')
   const [uploadedMeta, setUploadedMeta] = useState(null)
+  const [editorMode, setEditorMode] = useState('media')
+  const [codeSnippet, setCodeSnippet] = useState(DEFAULT_CODE_SNIPPET)
   const [isDragging, setIsDragging] = useState(false)
   const [padding, setPadding] = useState(48)
   const [cornerRadius, setCornerRadius] = useState(12)
@@ -529,13 +735,27 @@ function App() {
     [unsplashNonce],
   )
 
-  const previewRatio = aspectValueToRatio(aspectRatio, uploadedMeta)
   const previewCanvasDimensions = useMemo(
-    () => buildCanvasDimensions(aspectRatio, uploadedMeta),
-    [aspectRatio, uploadedMeta],
+    () =>
+      editorMode === 'code'
+        ? buildCodeCanvasDimensions(aspectRatio, codeSnippet, padding, windowFrameStyle)
+        : buildCanvasDimensions(aspectRatio, uploadedMeta),
+    [aspectRatio, uploadedMeta, editorMode, codeSnippet, padding, windowFrameStyle],
   )
+  const previewRatio = previewCanvasDimensions.width / previewCanvasDimensions.height
   const previewMediaRatio = uploadedMeta?.width && uploadedMeta?.height ? uploadedMeta.width / uploadedMeta.height : null
   const previewLayout = useMemo(() => {
+    if (editorMode === 'code') {
+      return buildCodeMediaLayout(
+        previewCanvasDimensions.width,
+        previewCanvasDimensions.height,
+        codeSnippet,
+        padding,
+        cornerRadius,
+        windowFrameStyle,
+      )
+    }
+
     if (!previewMediaRatio) return null
     return buildMediaLayout(
       previewCanvasDimensions.width,
@@ -545,7 +765,24 @@ function App() {
       cornerRadius,
       windowFrameStyle,
     )
-  }, [previewMediaRatio, previewCanvasDimensions, padding, cornerRadius, windowFrameStyle])
+  }, [editorMode, previewMediaRatio, previewCanvasDimensions, codeSnippet, padding, cornerRadius, windowFrameStyle])
+
+  const previewCodeSurfaceSrc = useMemo(() => {
+    if (editorMode !== 'code' || !previewLayout) return ''
+
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(previewLayout.mediaWidth))
+    canvas.height = Math.max(1, Math.round(previewLayout.mediaHeight))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return ''
+
+    drawCodeContentToCanvas(ctx, 0, 0, canvas.width, canvas.height, codeSnippet, {
+      colorTheme: theme,
+      metrics: previewLayout.codeMetrics,
+    })
+
+    return canvas.toDataURL('image/png')
+  }, [editorMode, previewLayout, codeSnippet, theme])
 
   const previewBackgroundStyle = useMemo(() => {
     if (selectedBg.type === 'solid') return { backgroundColor: selectedBg.value }
@@ -565,6 +802,8 @@ function App() {
   const previewShadowStyle = `0 ${Math.round(shadowIntensity * 0.35)}px ${Math.round(shadowIntensity * 0.95)}px rgba(0,0,0,${Math.max(0, shadowIntensity / 150)})${
     glassBorderEnabled ? `, inset 0 1px 0 rgba(255,255,255,${Math.min(0.09 + glassBorderStrength / 500, 0.35)})` : ''
   }`
+
+  const hasRenderablePreview = editorMode === 'code' || Boolean(uploadedSrc)
 
   const onPickFile = (file) => {
     if (!file || (!file.type.startsWith('image/') && !file.type.startsWith('video/'))) {
@@ -610,6 +849,31 @@ function App() {
     if (file) onPickFile(file)
   }
 
+  useEffect(() => {
+    const onPaste = (event) => {
+      if (editorMode !== 'media') return
+
+      const items = event.clipboardData?.items
+      if (!items) return
+
+      for (const item of items) {
+        if (!item.type.startsWith('image/')) continue
+        const file = item.getAsFile()
+        if (!file) continue
+
+        event.preventDefault()
+        onPickFile(file)
+        setStatusMessage('Image pasted from clipboard.')
+        return
+      }
+    }
+
+    window.addEventListener('paste', onPaste)
+    return () => {
+      window.removeEventListener('paste', onPaste)
+    }
+  }, [editorMode, onPickFile])
+
   const onBackgroundFileChange = (event) => {
     const file = event.target.files?.[0]
     if (!file) return
@@ -636,6 +900,7 @@ function App() {
   const onDrop = (event) => {
     event.preventDefault()
     setIsDragging(false)
+    if (editorMode !== 'media') return
     const file = event.dataTransfer.files?.[0]
     if (file) onPickFile(file)
   }
@@ -723,7 +988,55 @@ function App() {
     ctx.restore()
   }
 
+  const renderCodeCompositeBlob = async () => {
+    const { width, height } = buildCodeCanvasDimensions(aspectRatio, codeSnippet, padding, windowFrameStyle)
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Canvas not supported.')
+
+    await drawBackgroundToCanvas(ctx, width, height)
+    const layout = buildCodeMediaLayout(width, height, codeSnippet, padding, cornerRadius, windowFrameStyle)
+
+    if (windowFrameStyle === 'none') {
+      ctx.save()
+      ctx.shadowColor = `rgba(0, 0, 0, ${Math.max(0, shadowIntensity / 150)})`
+      ctx.shadowBlur = shadowIntensity * 1.1
+      ctx.shadowOffsetY = shadowIntensity * 0.28
+      ctx.beginPath()
+      ctx.roundRect(layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, layout.mediaRadius)
+      ctx.fillStyle = 'rgba(0,0,0,0.01)'
+      ctx.fill()
+      ctx.restore()
+
+      drawCodeContentToCanvas(ctx, layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, codeSnippet, {
+        colorTheme: theme,
+        metrics: layout.codeMetrics,
+      })
+      drawGlassBorderToCanvas(ctx, layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, layout.mediaRadius)
+    } else {
+      drawWindowChromeToCanvas(ctx, layout, windowFrameStyle, shadowIntensity, theme)
+      drawCodeContentToCanvas(ctx, layout.mediaX, layout.mediaY, layout.mediaWidth, layout.mediaHeight, codeSnippet, {
+        colorTheme: theme,
+        metrics: layout.codeMetrics,
+      })
+      drawGlassBorderToCanvas(ctx, layout.frameX, layout.frameY, layout.frameWidth, layout.frameHeight, layout.frameRadius)
+    }
+
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error('Could not create output image.'))
+      }, 'image/png')
+    })
+  }
+
   const renderCompositeBlob = async () => {
+    if (editorMode === 'code') {
+      return await renderCodeCompositeBlob()
+    }
+
     if (!uploadedSrc || !uploadedMeta) throw new Error('Upload an image first.')
     if (uploadedType !== 'image') throw new Error('Copy is available for image uploads only.')
 
@@ -951,15 +1264,16 @@ function App() {
     setStatusMessage('')
 
     try {
-      const blob = uploadedType === 'video' ? await renderCompositeVideoBlob() : await renderCompositeBlob()
+      const shouldExportVideo = editorMode === 'media' && uploadedType === 'video'
+      const blob = shouldExportVideo ? await renderCompositeVideoBlob() : await renderCompositeBlob()
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
       anchor.href = url
-      const videoMeta = uploadedType === 'video' ? getVideoDownloadMeta(blob) : null
-      anchor.download = uploadedType === 'video' ? videoMeta.filename : 'framedrop.png'
+      const videoMeta = shouldExportVideo ? getVideoDownloadMeta(blob) : null
+      anchor.download = shouldExportVideo ? videoMeta.filename : 'framedrop.png'
       anchor.click()
       URL.revokeObjectURL(url)
-      setStatusMessage(uploadedType === 'video' ? `Downloaded ${videoMeta.label}.` : 'Downloaded framedrop.png.')
+      setStatusMessage(shouldExportVideo ? `Downloaded ${videoMeta.label}.` : 'Downloaded framedrop.png.')
     } catch (error) {
       setStatusMessage(error.message || 'Download failed.')
     } finally {
@@ -971,7 +1285,7 @@ function App() {
     const shareUrl =
       'https://x.com/intent/tweet?text=Made+with+FrameDrop+%F0%9F%96%A4&url=https://frame-drop-23.vercel.app'
 
-    if (!uploadedSrc || uploadedType !== 'image') {
+    if (editorMode === 'media' && (!uploadedSrc || uploadedType !== 'image')) {
       window.open(shareUrl, '_blank', 'noopener,noreferrer')
       setStatusMessage('Opened X composer. Upload an image to include it in your post.')
       return
@@ -1027,6 +1341,22 @@ function App() {
       <div className="panel-header">
         <h2>Editor</h2>
         <p>Controls</p>
+      </div>
+
+      <div className="panel-section">
+        <p className="section-title">Share Mode</p>
+        <div className="chip-grid">
+          {EDITOR_MODES.map((mode) => (
+            <button
+              key={mode.value}
+              type="button"
+              className={`chip ${editorMode === mode.value ? 'chip-active' : ''}`}
+              onClick={() => setEditorMode(mode.value)}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="panel-section">
@@ -1120,6 +1450,21 @@ function App() {
           </label>
         )}
       </div>
+
+      {editorMode === 'code' && (
+        <div className="panel-section">
+          <p className="section-title">Code Snippet</p>
+          <textarea
+            className="code-editor-input"
+            value={codeSnippet}
+            onChange={(event) => setCodeSnippet(event.target.value)}
+            rows={12}
+            spellCheck={false}
+            placeholder="Paste your code here..."
+          />
+          <p className="status-line">Paste, edit, style background, then copy/download as image.</p>
+        </div>
+      )}
     </>
   )
 
@@ -1298,8 +1643,10 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand-wrap">
-          <h1>FrameDrop</h1>
-          <span>Screenshot Beautifier</span>
+          <img src={theme === 'dark' ? darkThemeLogo : lightThemeLogo} alt="FrameDrop logo" className="brand-mark" />
+          <div className="brand-text">
+            <span>Screenshot Beautifier</span>
+          </div>
         </div>
 
         <div className="mobile-controls">
@@ -1353,11 +1700,16 @@ function App() {
             type="button"
             className="ghost-btn"
             onClick={handleCopy}
-            disabled={!uploadedSrc || uploadedType !== 'image' || isCopying || isDownloading}
+            disabled={(editorMode === 'media' && uploadedType !== 'image') || isCopying || isDownloading}
           >
             {isCopying ? 'Copying...' : 'Copy'}
           </button>
-          <button type="button" className="solid-btn" onClick={handleDownload} disabled={!uploadedSrc || isCopying || isDownloading}>
+          <button
+            type="button"
+            className="solid-btn"
+            onClick={handleDownload}
+            disabled={(editorMode === 'media' && !uploadedSrc) || isCopying || isDownloading}
+          >
             {isDownloading ? 'Downloading...' : 'Download'}
           </button>
         </div>
@@ -1372,15 +1724,16 @@ function App() {
           style={{ ...previewBackgroundStyle, aspectRatio: String(previewRatio) }}
           onDragOver={(event) => {
             event.preventDefault()
+            if (editorMode !== 'media') return
             setIsDragging(true)
           }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={onDrop}
           onClick={() => {
-            if (!uploadedSrc) fileInputRef.current?.click()
+            if (editorMode === 'media' && !uploadedSrc) fileInputRef.current?.click()
           }}
         >
-          {uploadedSrc && (
+          {editorMode === 'media' && uploadedSrc && (
             <button
               type="button"
               className="upload-clear-btn"
@@ -1395,7 +1748,7 @@ function App() {
             </button>
           )}
 
-          {!uploadedSrc && (
+          {editorMode === 'media' && !uploadedSrc && (
             <div className="upload-empty-state">
               <div className="upload-icon">+</div>
               <h3>Drop your screenshot or video here</h3>
@@ -1404,7 +1757,7 @@ function App() {
             </div>
           )}
 
-          {uploadedSrc && previewLayout && windowFrameStyle === 'none' && (
+          {hasRenderablePreview && previewLayout && windowFrameStyle === 'none' && (
             <div
               className="preview-layer"
               style={{
@@ -1417,7 +1770,14 @@ function App() {
                 boxShadow: previewShadowStyle,
               }}
             >
-              {uploadedType === 'image' ? (
+              {editorMode === 'code' ? (
+                <img
+                  src={previewCodeSurfaceSrc}
+                  alt="Code preview"
+                  className="preview-image fitted"
+                  draggable={false}
+                />
+              ) : uploadedType === 'image' ? (
                 <img src={uploadedSrc} alt="Uploaded preview" className="preview-image fitted" />
               ) : (
                 <video src={uploadedSrc} className="preview-video fitted" autoPlay loop muted controls playsInline />
@@ -1425,7 +1785,7 @@ function App() {
             </div>
           )}
 
-          {uploadedSrc && previewLayout && windowFrameStyle !== 'none' && (
+          {hasRenderablePreview && previewLayout && windowFrameStyle !== 'none' && (
             <div
               className={`preview-window preview-window-${windowFrameStyle}`}
               style={{
@@ -1434,6 +1794,7 @@ function App() {
                 width: `${(previewLayout.frameWidth / previewCanvasDimensions.width) * 100}%`,
                 height: `${(previewLayout.frameHeight / previewCanvasDimensions.height) * 100}%`,
                 '--titlebar-height': `${(previewLayout.titlebarHeight / previewLayout.frameHeight) * 100}%`,
+                '--titlebar-px': `${Math.max(36, previewLayout.titlebarHeight)}px`,
                 '--window-radius': `${Math.min(cornerRadius + 8, 36)}px`,
                 border: previewBorderStyle,
                 boxShadow: previewShadowStyle,
@@ -1456,7 +1817,14 @@ function App() {
               </div>
 
               <div className="preview-window-content">
-                {uploadedType === 'image' ? (
+                {editorMode === 'code' ? (
+                  <img
+                    src={previewCodeSurfaceSrc}
+                    alt="Code preview"
+                    className="preview-image framed"
+                    draggable={false}
+                  />
+                ) : uploadedType === 'image' ? (
                   <img src={uploadedSrc} alt="Uploaded preview" className="preview-image framed" />
                 ) : (
                   <video src={uploadedSrc} className="preview-video framed" autoPlay loop muted controls playsInline />
